@@ -1,0 +1,45 @@
+{
+  "name": "abs-post-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud-first automation for alphabetical word canvas generation and social posting.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts tick",
+    "prisma:generate": "prisma generate",
+    "prisma:db:push": "prisma db push",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "typecheck": "npm run prisma:generate && tsc --noEmit -p tsconfig.json",
+    "build": "npm run prisma:generate && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "generate:next": "tsx src/index.ts generate-next",
+    "plan:due": "tsx src/index.ts plan-due",
+    "plan:session": "tsx src/index.ts plan-session",
+    "post:due": "tsx src/index.ts post-due",
+    "send:summaries": "tsx src/index.ts send-summaries",
+    "tick": "tsx src/index.ts tick"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.7.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "canvas": "^3.2.0",
+    "dotenv": "^16.6.1",
+    "luxon": "^3.7.2",
+    "nodemailer": "^7.0.10",
+    "pino": "^9.13.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^24.7.2",
+    "@types/nodemailer": "^6.4.17",
+    "prisma": "^6.7.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
