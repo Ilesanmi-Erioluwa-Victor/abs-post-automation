@@ -1,0 +1,357 @@
+================================================================================
+MASTER IMPLEMENTATION PROMPT — ENGLISH IDIOM & VOCABULARY AUTO-POSTING BOT
+================================================================================
+Target agent: Codex / OpenCode / Claude Code
+Author context: AbS Tech Connect content pipeline
+Output: A fully working Node.js/TypeScript service, deployable to Render,
+scheduled via GitHub Actions, generating and posting English word/idiom
+educational content automatically.
+
+--------------------------------------------------------------------------------
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+Build a backend service that, on each trigger, generates a batch of 5 pieces of
+English-learning content (either vocabulary words or idioms), renders each one
+into a branded infographic-style image, uploads the image, and posts the
+finished content to an external website's API.
+
+It runs 3 times per day (morning / afternoon / night), 5 posts per run,
+15 posts/day total, fully automated with zero manual intervention after setup.
+
+Two content tracks, alternated or run together depending on config:
+  TRACK A — "word": cycles English vocabulary words A → Z, deterministically,
+            never repeating, advancing to the next letter once enough words
+            for the current letter have been used.
+  TRACK B — "idiom": generates common English idioms in no fixed order,
+            never repeating a previously used idiom.
+
+--------------------------------------------------------------------------------
+2. TECH STACK (MUST USE EXACTLY THESE — NO SUBSTITUTIONS)
+--------------------------------------------------------------------------------
+- Runtime:        Node.js (LTS) + TypeScript
+- Web framework:  Express
+- Content gen:    Groq API (groq-sdk), model "llama-3.3-70b-versatile"
+- Database:       MongoDB Atlas (free M0 tier), via the official "mongodb" driver
+                  or Mongoose (agent's choice, prefer Mongoose for schema safety)
+- Image render:   node-canvas (NOT Puppeteer — keep this lightweight for
+                  Render's free-tier RAM constraints)
+- Image storage:  Cloudinary (cloudinary npm package)
+- Hosting:        Render free Web Service
+- Scheduler:      GitHub Actions (cron), calling this service's HTTP endpoint
+                  — do NOT build an in-process cron; scheduling lives outside
+                  this service entirely.
+- Env management: dotenv for local dev; Render environment variables in prod
+
+--------------------------------------------------------------------------------
+3. PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+idiom-vocab-bot/
+├── src/
+│   ├── config/
+│   │   └── env.ts                  # validates & exports all env vars
+│   ├── db/
+│   │   ├── connect.ts              # MongoDB connection singleton
+│   │   └── models/
+│   │       ├── LetterProgress.ts   # singleton doc: current letter, used words
+│   │       ├── UsedIdiom.ts        # flat collection of used idioms
+│   │       └── Post.ts             # log of every generated + posted item
+│   ├── content/
+│   │   ├── groqClient.ts           # Groq SDK client init
+│   │   ├── generateWord.ts         # Track A generation logic
+│   │   └── generateIdiom.ts        # Track B generation logic
+│   ├── render/
+│   │   ├── theme.ts                # AbS purple (#4B2ED1) brand constants,
+│   │   │                           # fonts, layout dimensions
+│   │   ├── illustrations.ts        # maps mood tag -> cached illustration
+│   │   │                           # image URL (pre-generated, stored in
+│   │   │                           # Cloudinary, referenced by static list)
+│   │   └── renderCard.ts           # node-canvas: draws the full infographic
+│   │                               # (title banner, meaning box, "think of
+│   │                               # it as" tip, 2 numbered example panels,
+│   │                               # footer) and returns a PNG buffer
+│   ├── storage/
+│   │   └── uploadImage.ts          # uploads PNG buffer to Cloudinary,
+│   │                               # returns public URL
+│   ├── publish/
+│   │   └── postToSite.ts           # POSTs finished content to the target
+│   │                               # website endpoint (URL/auth via env)
+│   ├── orchestrator/
+│   │   └── runBatch.ts             # runs N generations end-to-end:
+│   │                               # generate -> render -> upload -> post
+│   │                               # -> log to Post collection
+│   ├── routes/
+│   │   └── batch.ts                # POST /run-batch { count, slot } —
+│   │                               # triggered by GitHub Actions
+│   └── server.ts                   # Express app entrypoint
+├── .env.example
+├── package.json
+├── tsconfig.json
+└── README.md
+
+--------------------------------------------------------------------------------
+4. ENVIRONMENT VARIABLES (.env.example — populate all of these)
+--------------------------------------------------------------------------------
+PORT=3000
+MONGODB_URI=<mongodb atlas connection string>
+GROQ_API_KEY=<groq api key>
+CLOUDINARY_CLOUD_NAME=<cloudinary cloud name>
+CLOUDINARY_API_KEY=<cloudinary api key>
+CLOUDINARY_API_SECRET=<cloudinary api secret>
+SITE_POST_ENDPOINT=<the website URL this bot posts finished content to>
+SITE_API_KEY=<bearer token / api key the website expects for auth>
+TRIGGER_AUTH_TOKEN=<a secret this service itself requires on /run-batch,
+                     so random requests can't trigger generation/spend>
+
+--------------------------------------------------------------------------------
+5. DATABASE SCHEMA (MongoDB / Mongoose)
+--------------------------------------------------------------------------------
+
+LetterProgress (singleton document, _id: "letterProgress")
+{
+  _id: "letterProgress",
+  currentLetter: String,       // e.g. "A"
+  usedWords: [String],         // lowercase words already generated for
+                                // the CURRENT letter only (reset on advance)
+  wordsPerLetter: Number,      // e.g. 5 — how many words before advancing
+  cycleCount: Number           // increments each full A→Z pass, so pass 2
+                                // can be instructed to use harder vocabulary
+}
+
+UsedIdiom
+{
+  _id: ObjectId,
+  idiom: String,                // normalized lowercase, for dedupe checks
+  createdAt: Date
+}
+
+Post (audit log — every single generated + published item)
+{
+  _id: ObjectId,
+  type: "word" | "idiom",
+  term: String,
+  meaning: String,
+  thinkOfItAs: String,
+  examples: [{ scenario: String, quote: String }],
+  usedIn: String,
+  imageUrl: String,
+  batchSlot: "morning" | "afternoon" | "night",
+  status: "posted" | "failed",
+  errorMessage: String | null,
+  createdAt: Date
+}
+
+--------------------------------------------------------------------------------
+6. CONTENT GENERATION LOGIC
+--------------------------------------------------------------------------------
+6.1 Shared JSON contract (both tracks return this exact shape):
+{
+  "term": string,
+  "meaning": string,
+  "thinkOfItAs": string,
+  "examples": [
+    { "scenario": string, "quote": string },
+    { "scenario": string, "quote": string }
+  ],
+  "usedIn": string,
+  "mood": "positive" | "negative" | "neutral"   // used to pick illustration
+}
+
+6.2 generateWord(letter, usedWords):
+  - Call Groq with llama-3.3-70b-versatile, response_format json_object
+  - Prompt must explicitly instruct: word must start with `letter`, must not
+    be in `usedWords`, must be genuinely useful/common vocabulary (not
+    obscure), and must return ONLY the JSON object, no prose, no markdown
+    fences.
+  - On successful generation: push term to LetterProgress.usedWords.
+  - If LetterProgress.usedWords.length >= wordsPerLetter: advance
+    currentLetter to next letter (Z -> A, incrementing cycleCount), and
+    reset usedWords to [].
+
+6.3 generateIdiom(usedIdioms):
+  - Call Groq with the same model/format.
+  - Prompt: generate one common English idiom NOT in the provided list of
+    used idioms (pass up to the most recent ~100 for prompt-length safety —
+    do a case-insensitive substring/exact check against the FULL used list
+    in code afterward as a safety net, and regenerate once if a collision
+    is detected).
+  - On success: insert into UsedIdiom collection.
+
+6.4 Retry policy: if Groq returns malformed JSON, retry the call once with
+    a stricter "return ONLY valid JSON" reminder appended. If it fails twice,
+    throw and let the orchestrator mark that slot as failed without crashing
+    the whole batch.
+
+--------------------------------------------------------------------------------
+7. IMAGE RENDERING (node-canvas)
+--------------------------------------------------------------------------------
+Build renderCard.ts to reproduce this exact infographic layout, reskinned to
+AbS brand colors:
+
+- Canvas size: 1200 x 1500 px
+- Header banner: dark purple background (#4B2ED1), large bold title text
+  (the term/idiom), small decorative accent (star or sparkle icon drawn with
+  canvas primitives, not an external asset)
+- "MEANING" section: light lavender background box, dark text explaining
+  the meaning in plain language
+- "Think of it as" callout: small side box with a lightbulb icon (drawn or
+  a cached PNG from Cloudinary) and the thinkOfItAs text
+- "EXAMPLES" banner divider
+- Two numbered example panels, each showing:
+    - a numbered circle badge (1, 2)
+    - the scenario text
+    - the illustrative quote in a speech-bubble-style box
+    - a cached illustration image matching `mood` (see illustrations.ts)
+- Footer: "GOOD TO KNOW" tip box + "USED IN:" tag line
+
+illustrations.ts should hold a small fixed lookup table (8–10 entries) of
+pre-generated illustration image URLs already uploaded to Cloudinary, keyed
+by mood + a rotating index, so renderCard.ts never needs to generate new art
+per post — it just fetches and draws a cached image via node-canvas's
+loadImage().
+
+Use a clean, legible web-safe or bundled font (register a .ttf with
+registerFont() if a custom brand font is desired — otherwise fall back to a
+system sans-serif).
+
+Return a PNG Buffer from renderCard(), do not write to disk unless needed
+for local debugging (guard any disk writes behind NODE_ENV !== "production").
+
+--------------------------------------------------------------------------------
+8. IMAGE UPLOAD
+--------------------------------------------------------------------------------
+uploadImage.ts: accepts a PNG buffer, uploads via the Cloudinary SDK's
+upload_stream to a folder like "idiom-bot/", returns the secure_url.
+Handle upload failures with a single retry before propagating the error.
+
+--------------------------------------------------------------------------------
+9. POSTING TO THE WEBSITE
+--------------------------------------------------------------------------------
+postToSite.ts: POSTs to process.env.SITE_POST_ENDPOINT with:
+{
+  "type": "word" | "idiom",
+  "term": "...",
+  "meaning": "...",
+  "thinkOfItAs": "...",
+  "examples": [...],
+  "usedIn": "...",
+  "imageUrl": "..."
+}
+Headers: Authorization: Bearer <SITE_API_KEY>, Content-Type: application/json
+[NOTE TO AGENT: the exact payload shape may need adjusting once the real
+target endpoint's expected schema is confirmed — leave this function's
+body shape easy to modify in one place.]
+
+Treat non-2xx responses as failures; log them to the Post collection with
+status "failed" and the response body as errorMessage, but do NOT let one
+failed post crash the rest of the batch.
+
+--------------------------------------------------------------------------------
+10. ORCHESTRATOR (runBatch.ts)
+--------------------------------------------------------------------------------
+async function runBatch(count: number, slot: "morning"|"afternoon"|"night"):
+  for i in 1..count:
+    - decide type: alternate word/idiom, e.g. odd i = word, even i = idiom
+      (agent may implement a simple round-robin or weighted random — keep
+      it configurable via a constant at the top of the file)
+    - generate content (section 6)
+    - render image (section 7)
+    - upload image (section 8)
+    - post to site (section 9)
+    - save Post document reflecting the outcome (success or failure)
+    - continue to next item regardless of individual failures
+  return a summary: { requested, succeeded, failed }
+
+This function must never throw uncaught — wrap each iteration's steps in
+try/catch, log the error, record status "failed", and move on.
+
+--------------------------------------------------------------------------------
+11. HTTP ENDPOINT (routes/batch.ts + server.ts)
+--------------------------------------------------------------------------------
+POST /run-batch
+  - Requires header: Authorization: Bearer <TRIGGER_AUTH_TOKEN>
+    (reject with 401 if missing/incorrect — this is what stops random
+    internet traffic from triggering paid/rate-limited generation runs)
+  - Body: { "count": number, "slot": "morning" | "afternoon" | "night" }
+  - Respond immediately with 202 Accepted and a batch ID, then run
+    runBatch() asynchronously in the background (do not block the HTTP
+    response for the full batch duration — Render free tier has request
+    timeouts, and GitHub Actions' curl call should not need to hang for
+    minutes).
+  - Optionally expose GET /batch-status/:id for polling, backed by a
+    simple in-memory or DB-tracked status record (nice-to-have, not
+    required for v1).
+
+Also add:
+GET /health -> returns { status: "ok" } for uptime checks.
+
+--------------------------------------------------------------------------------
+12. DEPLOYMENT (Render)
+--------------------------------------------------------------------------------
+- Create a new Render Web Service from this repo.
+- Build command: npm install && npm run build
+- Start command: npm start (runs compiled dist/server.js)
+- Add all env vars from section 4 in Render's dashboard.
+- Free tier: service will spin down after 15 min idle — this is fine,
+  since it's only woken by the 3x/day GitHub Actions trigger. Cold start
+  can take up to ~60 seconds, which GitHub Actions' curl timeout must
+  accommodate.
+
+--------------------------------------------------------------------------------
+13. SCHEDULING (GitHub Actions — separate small repo or same repo)
+--------------------------------------------------------------------------------
+Create .github/workflows/post-schedule.yml:
+
+name: Idiom Bot Scheduler
+on:
+  schedule:
+    - cron: "0 6 * * *"   # morning (adjust for WAT/UTC offset)
+    - cron: "0 12 * * *"  # afternoon
+    - cron: "0 18 * * *"  # night
+  workflow_dispatch: {}
+jobs:
+  trigger-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger batch
+        run: |
+          curl -X POST "${{ secrets.BOT_TRIGGER_URL }}/run-batch" \
+            -H "Authorization: Bearer ${{ secrets.TRIGGER_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"count": 5, "slot": "morning"}' \
+            --max-time 120
+
+[NOTE TO AGENT: create 3 separate steps/workflows or pass "slot" dynamically
+based on which cron fired, e.g. via a small bash check on the current UTC
+hour, since GitHub Actions cron entries don't natively pass which schedule
+triggered them.]
+
+Store BOT_TRIGGER_URL and TRIGGER_AUTH_TOKEN as GitHub repo secrets.
+
+--------------------------------------------------------------------------------
+14. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+[ ] npm run dev starts the Express server locally without errors given a
+    valid .env
+[ ] POST /run-batch with count=1 successfully: generates one word/idiom via
+    Groq, renders a PNG locally verifiable, uploads to Cloudinary, attempts
+    a POST to SITE_POST_ENDPOINT, and writes a Post document to MongoDB
+[ ] LetterProgress correctly advances letters after wordsPerLetter words
+    have been generated for the current letter
+[ ] UsedIdiom prevents duplicate idioms across multiple runs
+[ ] A single failed generation/render/upload/post does not crash the batch
+    — remaining items in the batch still process
+[ ] /health returns 200 OK
+[ ] Missing/incorrect Authorization header on /run-batch returns 401
+[ ] README.md documents setup steps, all env vars, and how to test locally
+
+--------------------------------------------------------------------------------
+15. NOTES / OPEN ITEMS FOR THE HUMAN (not for the agent to guess)
+--------------------------------------------------------------------------------
+- Exact SITE_POST_ENDPOINT payload schema: confirm with the target website's
+  actual API before finalizing postToSite.ts's body shape.
+- wordsPerLetter value: choose based on desired pacing through the alphabet.
+- Illustration set: pre-generate and upload the 8-10 cached mood images to
+  Cloudinary before first run; illustrations.ts references them by URL.
+================================================================================
+END OF PROMPT
+================================================================================

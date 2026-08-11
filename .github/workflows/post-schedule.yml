@@ -1,0 +1,50 @@
+name: Idiom Bot Scheduler
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # morning (08:00 WAT / 07:00 UTC)
+    - cron: "0 13 * * *"  # afternoon (14:00 WAT / 13:00 UTC)
+    - cron: "0 20 * * *"  # night (21:00 WAT / 20:00 UTC)
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Batch slot"
+        type: choice
+        options:
+          - morning
+          - afternoon
+          - night
+        default: morning
+      count:
+        description: "Number of posts in the batch"
+        type: number
+        default: 6
+
+jobs:
+  trigger-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine slot
+        id: slot
+        run: |
+          if [ -n "${{ github.event.inputs.slot }}" ]; then
+            echo "slot=${{ github.event.inputs.slot }}" >> "$GITHUB_OUTPUT"
+            echo "count=${{ github.event.inputs.count || 5 }}" >> "$GITHUB_OUTPUT"
+          else
+            HOUR=$(date -u +%H)
+            case "$HOUR" in
+              07) echo "slot=morning" >> "$GITHUB_OUTPUT" ;;
+              13) echo "slot=afternoon" >> "$GITHUB_OUTPUT" ;;
+              20) echo "slot=night" >> "$GITHUB_OUTPUT" ;;
+              *)  echo "slot=morning" >> "$GITHUB_OUTPUT" ;;
+            esac
+            echo "count=6" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger batch
+        run: |
+          curl -sS -X POST "${{ secrets.BOT_TRIGGER_URL }}/run-batch" \
+            -H "Authorization: Bearer ${{ secrets.TRIGGER_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"count\": ${{ steps.slot.outputs.count }}, \"slot\": \"${{ steps.slot.outputs.slot }}\"}" \
+            --max-time 120
