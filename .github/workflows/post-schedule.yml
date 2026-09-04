@@ -42,9 +42,14 @@ jobs:
           fi
 
       - name: Trigger batch
+        env:
+          BOT_URL: ${{ secrets.BOT_TRIGGER_URL }}
+          BOT_TOKEN: ${{ secrets.TRIGGER_AUTH_TOKEN }}
         run: |
-          curl -sS -X POST "${{ secrets.BOT_TRIGGER_URL }}/run-batch" \
-            -H "Authorization: Bearer ${{ secrets.TRIGGER_AUTH_TOKEN }}" \
+          BOT_URL="$(printf '%s' "$BOT_URL" | tr -d '\r\n\t ')"
+          echo "Resolved BOT_URL length: ${#BOT_URL}"
+          curl -sS -X POST "${BOT_URL}/run-batch" \
+            -H "Authorization: Bearer ${BOT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"count\": ${{ steps.slot.outputs.count }}, \"slot\": \"${{ steps.slot.outputs.slot }}\"}" \
             --max-time 120
