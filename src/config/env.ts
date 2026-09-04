@@ -29,7 +29,7 @@ export const env = {
   mongodbUri: requireEnv("MONGODB_URI"),
 
   groqApiKey: requireEnv("GROQ_API_KEY"),
-  groqModel: optionalEnv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+  groqModel: optionalEnv("GROQ_MODEL", "openai/gpt-oss-120b"),
 
   cloudinaryCloudName: requireEnv("CLOUDINARY_CLOUD_NAME"),
   cloudinaryApiKey: requireEnv("CLOUDINARY_API_KEY"),
