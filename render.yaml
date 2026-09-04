@@ -9,7 +9,6 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /health
-    nodeVersion: 20.18.0
     envVars:
       - key: NODE_ENV
         value: production
@@ -35,12 +34,3 @@ services:
         generateValue: true
       - key: WORDS_PER_LETTER
         value: "5"
-      - key: BREVO_API_KEY
-        sync: false
-        optional: true
-      - key: BREVO_EMAIL
-        sync: false
-        optional: true
-      - key: NOTIFY_EMAIL
-        sync: false
-        optional: true
