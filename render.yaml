@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: abs-post-bot
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    nodeVersion: 20.18.0
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: MONGODB_URI
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: SITE_POST_ENDPOINT
+        value: https://backend.abstechconnect.com/api/v1/create-quill-post-new
+      - key: SITE_API_KEY
+        sync: false
+      - key: TRIGGER_AUTH_TOKEN
+        generateValue: true
+      - key: WORDS_PER_LETTER
+        value: "5"
+      - key: BREVO_API_KEY
+        sync: false
+        optional: true
+      - key: BREVO_EMAIL
+        sync: false
+        optional: true
+      - key: NOTIFY_EMAIL
+        sync: false
+        optional: true
