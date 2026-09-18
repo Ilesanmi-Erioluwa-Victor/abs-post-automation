@@ -2,7 +2,7 @@ import { Schema, model, models } from "mongoose";
 import type { Model } from "mongoose";
 
 export type ContentType = "word" | "idiom";
-export type BatchSlot = "morning" | "afternoon" | "night";
+export type BatchSlot = "9am" | "12pm" | "3pm" | "6pm" | "9pm" | "12am";
 export type PostStatus = "posted" | "failed";
 export type Mood = "positive" | "negative" | "neutral";
 
@@ -44,7 +44,7 @@ const postSchema = new Schema<PostDoc>(
     imageUrl: { type: String, default: "" },
     batchSlot: {
       type: String,
-      enum: ["morning", "afternoon", "night"],
+      enum: ["9am", "12pm", "3pm", "6pm", "9pm", "12am"],
       required: true,
     },
     status: { type: String, enum: ["posted", "failed"], required: true },

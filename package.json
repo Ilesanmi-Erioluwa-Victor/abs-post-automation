@@ -2,7 +2,7 @@
   "name": "idiom-vocab-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Automated English idiom & vocabulary content bot - generates, renders, and posts branded infographics 3x daily via Render + GitHub Actions.",
+  "description": "Automated English idiom & vocabulary content bot - generates, renders, and posts branded infographics 6x daily via Render + GitHub Actions.",
   "engines": {
     "node": ">=20.0.0"
   },

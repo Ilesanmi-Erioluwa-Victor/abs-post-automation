@@ -1,11 +1,11 @@
 # English Idiom & Vocabulary Auto-Posting Bot
 
 An automated content pipeline for AbS Tech Connect. On every trigger it
-generates a batch of 5 English-learning posts (vocabulary words or idioms),
+generates a batch of 6 English-learning posts (vocabulary words or idioms),
 renders each one into a branded infographic (AbS purple `#4B2ED1`), uploads
 the image, and publishes the finished post to an external website's API.
 
-It runs 3× per day (morning / afternoon / night) → 15 posts/day, with **zero
+It runs 6× per day (9am / 12pm / 3pm / 6pm / 9pm / 12am WAT) → 36 posts/day, with **zero
 manual intervention** after setup. Scheduling lives in GitHub Actions; the
 service itself is a stateless HTTP API hosted on Render.
 
@@ -95,7 +95,7 @@ Cloudinary, POSTs to the site, and writes a `Post` document):
 curl -X POST http://localhost:3000/run-batch \
   -H "Authorization: Bearer <TRIGGER_AUTH_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"count": 1, "slot": "morning"}'
+  -d '{"count": 1, "slot": "9am"}'
 # {"batchId":"...","status":"accepted"}
 ```
 
@@ -107,7 +107,7 @@ curl http://localhost:3000/batch-status/<batchId>
 
 ### Endpoints
 
-- `POST /run-batch` — body `{ "count": number, "slot": "morning"|"afternoon"|"night" }`,
+- `POST /run-batch` — body `{ "count": number, "slot": "9am"|"12pm"|"3pm"|"6pm"|"9pm"|"12am" }`,
   requires `Authorization: Bearer <TRIGGER_AUTH_TOKEN>`. Returns `202` immediately,
   runs the batch in the background. `401` if the token is missing/incorrect.
 - `GET /batch-status/:id` — in-memory status/summary of a batch run.
@@ -149,13 +149,14 @@ a single failed generation/render/upload/post never crashes the rest of the batc
 4. **Start command:** `npm start` (runs compiled `dist/server.js`)
 5. Add every env var from the table above in Render's dashboard.
 6. Free tier spins down after 15 min idle — fine here, since it's only woken by
-   the 3×/day GitHub Actions trigger. Cold start can take up to ~60s, which the
+   the 6×/day GitHub Actions trigger. Cold start can take up to ~60s, which the
    workflow's `--max-time 120` accommodates.
 
 ## Scheduling (GitHub Actions)
 
-`.github/workflows/post-schedule.yml` triggers at 06:00 / 12:00 / 18:00 UTC
-(adjust the cron to your WAT/UTC offset). A bash step determines the slot from
+`.github/workflows/post-schedule.yml` triggers at 08:00 / 11:00 / 14:00 /
+17:00 / 20:00 / 23:00 UTC (09:00 / 12:00 / 15:00 / 18:00 / 21:00 / 00:00 WAT).
+A bash step determines the slot from
 the current UTC hour so each cron fires exactly one batch, and `workflow_dispatch`
 lets you run a batch manually.
 

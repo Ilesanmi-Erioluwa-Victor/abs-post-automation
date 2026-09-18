@@ -8,7 +8,7 @@ import type { BatchSlot } from "../db/models/Post";
 
 const router = Router();
 
-const SLOTS: BatchSlot[] = ["morning", "afternoon", "night"];
+const SLOTS: BatchSlot[] = ["9am", "12pm", "3pm", "6pm", "9pm", "12am"];
 
 interface BatchRecord {
   status: "running" | "completed" | "failed";
@@ -37,7 +37,7 @@ router.post("/run-batch", (req, res) => {
   if (!SLOTS.includes(slot)) {
     res
       .status(400)
-      .json({ error: "slot must be one of: morning, afternoon, night." });
+      .json({ error: "slot must be one of: 9am, 12pm, 3pm, 6pm, 9pm, 12am." });
     return;
   }
 
