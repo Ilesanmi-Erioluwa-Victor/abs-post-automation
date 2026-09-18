@@ -37,14 +37,16 @@ jobs:
             echo "slot=${{ github.event.inputs.slot }}" >> "$GITHUB_OUTPUT"
             echo "count=${{ github.event.inputs.count || 5 }}" >> "$GITHUB_OUTPUT"
           else
-            HOUR=$(date -u +%H)
-            case "$HOUR" in
-              08) echo "slot=9am" >> "$GITHUB_OUTPUT" ;;
-              11) echo "slot=12pm" >> "$GITHUB_OUTPUT" ;;
-              14) echo "slot=3pm" >> "$GITHUB_OUTPUT" ;;
-              17) echo "slot=6pm" >> "$GITHUB_OUTPUT" ;;
-              20) echo "slot=9pm" >> "$GITHUB_OUTPUT" ;;
-              23) echo "slot=12am" >> "$GITHUB_OUTPUT" ;;
+            # Map from the cron expression that triggered this run (not the
+            # wall-clock hour) so GitHub scheduling delays can't mislabel
+            # the slot. github.event.schedule is e.g. "0 17 * * *".
+            case "${{ github.event.schedule }}" in
+              "0 8 * * *") echo "slot=9am" >> "$GITHUB_OUTPUT" ;;
+              "0 11 * * *") echo "slot=12pm" >> "$GITHUB_OUTPUT" ;;
+              "0 14 * * *") echo "slot=3pm" >> "$GITHUB_OUTPUT" ;;
+              "0 17 * * *") echo "slot=6pm" >> "$GITHUB_OUTPUT" ;;
+              "0 20 * * *") echo "slot=9pm" >> "$GITHUB_OUTPUT" ;;
+              "0 23 * * *") echo "slot=12am" >> "$GITHUB_OUTPUT" ;;
               *)  echo "slot=9am" >> "$GITHUB_OUTPUT" ;;
             esac
             echo "count=6" >> "$GITHUB_OUTPUT"
