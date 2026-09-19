@@ -33,13 +33,17 @@ jobs:
       - name: Determine slot
         id: slot
         run: |
-          if [ -n "${{ github.event.inputs.slot }}" ]; then
-            echo "slot=${{ github.event.inputs.slot }}" >> "$GITHUB_OUTPUT"
-            echo "count=${{ github.event.inputs.count || 5 }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Keep the externally visible slot names in 12-hour Nigeria time.
+            # The scheduler below is UTC because GitHub Actions cron has no
+            # timezone option; only this internal mapping uses 24-hour UTC.
+            echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
+            echo "count=${{ inputs.count || 6 }}" >> "$GITHUB_OUTPUT"
           else
             # Map from the cron expression that triggered this run (not the
             # wall-clock hour) so GitHub scheduling delays can't mislabel
-            # the slot. github.event.schedule is e.g. "0 17 * * *".
+            # the slot. Nigeria uses WAT (UTC+01:00) year-round, so the
+            # 23:00 UTC trigger is 12:00am WAT on the following day.
             case "${{ github.event.schedule }}" in
               "0 8 * * *") echo "slot=9am" >> "$GITHUB_OUTPUT" ;;
               "0 11 * * *") echo "slot=12pm" >> "$GITHUB_OUTPUT" ;;

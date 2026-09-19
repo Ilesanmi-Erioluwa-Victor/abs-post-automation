@@ -156,9 +156,10 @@ a single failed generation/render/upload/post never crashes the rest of the batc
 
 `.github/workflows/post-schedule.yml` triggers at 08:00 / 11:00 / 14:00 /
 17:00 / 20:00 / 23:00 UTC (09:00 / 12:00 / 15:00 / 18:00 / 21:00 / 00:00 WAT).
-A bash step determines the slot from
-the current UTC hour so each cron fires exactly one batch, and `workflow_dispatch`
-lets you run a batch manually.
+The workflow maps each cron expression directly to its 12-hour WAT slot, so
+GitHub scheduling delays cannot change the slot. The final 23:00 UTC trigger
+posts at 12:00am WAT on the following day. `workflow_dispatch` uses the same
+12-hour slot names for manual runs.
 
 Add these two **GitHub repo secrets**:
 
