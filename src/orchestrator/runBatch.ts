@@ -12,6 +12,14 @@ export const BATCH_STRATEGY: "round-robin" | "weighted-random" = "round-robin";
 
 const WEIGHTED_WORD_PROBABILITY = 0.5;
 
+// Pause between items so back-to-back Groq calls don't trip the
+// tokens-per-minute rate limit. Negligible for a cron job, big win for 429s.
+const INTER_ITEM_DELAY_MS = 4000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface BatchSummary {
   requested: number;
   succeeded: number;
@@ -47,6 +55,9 @@ export async function runBatch(
   const postedTerms: string[] = [];
 
   for (let i = 0; i < count; i++) {
+    if (i > 0) {
+      await sleep(INTER_ITEM_DELAY_MS);
+    }
     const type = decideType(i);
     let content: ContentBundle | null = null;
 

@@ -15,7 +15,8 @@ const SYSTEM_PROMPT =
 const USER_PROMPT_TEMPLATE = (
   letter: string,
   usedWords: string[],
-  cycle: number
+  cycle: number,
+  attempt: number
 ): string => {
   const difficulty =
     cycle === 0
@@ -24,11 +25,18 @@ const USER_PROMPT_TEMPLATE = (
         ? "solidly common vocabulary, slightly more advanced than average"
         : "challenging but genuinely common and useful vocabulary";
 
+  // After a few collisions (e.g. letters like X with small pools), allow
+  // rare but real words rather than failing the whole item.
+  const rarityHint =
+    attempt >= 4
+      ? " If you cannot think of an unused common word, a rare but real English word is acceptable."
+      : "";
+
   return `Generate exactly ONE English vocabulary word.
 - The word MUST start with the letter "${letter}".
 - It must NOT be any of these already-used words: ${JSON.stringify(usedWords)}.
 - Do NOT restrict word length. Include short everyday words (like "at", "by", "us", "bi") as well as longer ones, just like a normal dictionary.
-- Choose ${difficulty}. Avoid obscure, archaic, or overly technical words.
+- Choose ${difficulty}. Avoid obscure, archaic, or overly technical words.${rarityHint}
 - Respond with ONLY a JSON object with exactly these fields:
   term (string),
   meaning (string, plain-language definition),
@@ -39,6 +47,10 @@ const USER_PROMPT_TEMPLATE = (
 };
 
 type LetterProgressHydrated = HydratedDocument<LetterProgressDoc>;
+
+// Some letters (X, Q, Z...) have small pools of common words. Trying several
+// candidates per item keeps the pipeline flowing as history grows.
+const MAX_GENERATION_ATTEMPTS = 6;
 
 async function getOrInitLetterProgress(): Promise<LetterProgressHydrated> {
   let doc = await LetterProgress.findById("letterProgress");
@@ -75,51 +87,45 @@ export async function generateWord(): Promise<ContentBundle> {
   const recent = await getRecentUsedWords();
   const full = await getFullUsedWords();
   const letterUsed = (progress.usedWords ?? []).map((w) => w.toLowerCase());
+  const tried: string[] = [];
 
-  const content = await generateJson<ContentBundle>(
-    SYSTEM_PROMPT,
-    USER_PROMPT_TEMPLATE(letter, [...recent, ...letterUsed], cycle)
-  );
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    const excluded = [...recent, ...letterUsed, ...tried];
+    let prompt = USER_PROMPT_TEMPLATE(letter, excluded, cycle, attempt);
+    if (tried.length > 0) {
+      prompt += `\n\nThe word "${tried[tried.length - 1]}" has already been used. Generate a different one.`;
+    }
 
-  const term = content.term.trim().toLowerCase();
-  if (!term.startsWith(letter.toLowerCase())) {
-    throw new Error(
-      `Generated word "${content.term}" does not start with letter "${letter}".`
-    );
-  }
-  if (full.includes(term) || letterUsed.includes(term)) {
-    const regenerated = await generateJson<ContentBundle>(
-      SYSTEM_PROMPT,
-      `${USER_PROMPT_TEMPLATE(letter, [...recent, ...letterUsed], cycle)}\n\nThe word "${content.term}" has already been used. Generate a different one.`
-    );
-    const retryTerm = regenerated.term.trim().toLowerCase();
-    if (!retryTerm.startsWith(letter.toLowerCase())) {
+    const content = await generateJson<ContentBundle>(SYSTEM_PROMPT, prompt);
+
+    const term = content.term.trim().toLowerCase();
+    if (!term.startsWith(letter.toLowerCase())) {
       throw new Error(
-        `Regenerated word "${regenerated.term}" does not start with letter "${letter}".`
+        `Generated word "${content.term}" does not start with letter "${letter}".`
       );
     }
-    if (full.includes(retryTerm) || letterUsed.includes(retryTerm)) {
-      throw new Error(
-        `Generated word "${regenerated.term}" was already used for "${letter}".`
-      );
+    if (full.includes(term) || letterUsed.includes(term)) {
+      tried.push(content.term);
+      continue;
     }
-    progress.usedWords = [...letterUsed, retryTerm];
+
+    progress.usedWords = [...letterUsed, term];
     if (progress.usedWords.length >= progress.wordsPerLetter) {
       advanceLetter(progress);
     }
     await progress.save();
-    await UsedWord.create({ word: retryTerm, letter });
-    return { ...regenerated, type: "word" };
+    await UsedWord.create({ word: term, letter });
+
+    return { ...content, type: "word" };
   }
 
-  progress.usedWords = [...letterUsed, term];
-  if (progress.usedWords.length >= progress.wordsPerLetter) {
-    advanceLetter(progress);
-  }
+  // The letter's pool is exhausted (e.g. X): advance so future runs don't
+  // keep failing on the same letter, then report this item as failed.
+  advanceLetter(progress);
   await progress.save();
-  await UsedWord.create({ word: term, letter });
-
-  return { ...content, type: "word" };
+  throw new Error(
+    `Could not generate a fresh word for "${letter}" after ${MAX_GENERATION_ATTEMPTS} attempts (tried: ${tried.join("; ")}). Advanced to "${progress.currentLetter}".`
+  );
 }
 
 function advanceLetter(progress: LetterProgressHydrated): void {

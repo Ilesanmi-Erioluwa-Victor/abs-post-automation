@@ -6,10 +6,16 @@ const SYSTEM_PROMPT =
   "You are a professional English idioms teacher. You always respond with " +
   "only valid JSON objects that match the requested schema exactly.";
 
-const USER_PROMPT_TEMPLATE = (recentUsed: string[]): string => {
+const USER_PROMPT_TEMPLATE = (recentUsed: string[], attempt: number): string => {
+  // After a few collisions, let the model reach for real but less common
+  // idioms — a genuine idiom beats failing the whole item.
+  const rarityHint =
+    attempt >= 4
+      ? "\n- If you cannot think of an unused common idiom, choose a real but less common English idiom instead. It must still be a genuine, recognized idiom."
+      : "";
   return `Generate exactly ONE common English idiom.
 - It must NOT be any of these already-used idioms: ${JSON.stringify(recentUsed)}.
-- Choose a genuinely common, widely understood idiom. Avoid obscure or regional-only phrases.
+- Choose a genuinely common, widely understood idiom. Avoid obscure or regional-only phrases.${rarityHint}
 - Respond with ONLY a JSON object with exactly these fields:
   term (string, the idiom itself),
   meaning (string, plain-language explanation),
@@ -39,33 +45,32 @@ function hasCollision(normalized: string, fullUsed: string[]): boolean {
   );
 }
 
+// The used-idiom pool grows forever, so a single regeneration is no longer
+// enough — try several candidates before giving up on the item.
+const MAX_GENERATION_ATTEMPTS = 6;
+
 export async function generateIdiom(): Promise<ContentBundle> {
   const recent = await getRecentUsedIdioms();
   const full = await getFullUsedIdioms();
+  const tried: string[] = [];
 
-  const first = await generateJson<ContentBundle>(
-    SYSTEM_PROMPT,
-    USER_PROMPT_TEMPLATE(recent)
-  );
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    const excluded = [...recent, ...tried];
+    let prompt = USER_PROMPT_TEMPLATE(excluded, attempt);
+    if (tried.length > 0) {
+      prompt += `\n\nThe idiom "${tried[tried.length - 1]}" has already been used. Generate a different one.`;
+    }
 
-  const firstNormalized = first.term.toLowerCase().trim();
-  if (!hasCollision(firstNormalized, full)) {
-    await UsedIdiom.create({ idiom: firstNormalized });
-    return { ...first, type: "idiom" };
+    const candidate = await generateJson<ContentBundle>(SYSTEM_PROMPT, prompt);
+    const normalized = candidate.term.toLowerCase().trim();
+    if (!hasCollision(normalized, full)) {
+      await UsedIdiom.create({ idiom: normalized });
+      return { ...candidate, type: "idiom" };
+    }
+    tried.push(candidate.term);
   }
 
-  const second = await generateJson<ContentBundle>(
-    SYSTEM_PROMPT,
-    `${USER_PROMPT_TEMPLATE(recent)}\n\nThe idiom "${first.term}" has already been used. Generate a different one.`
+  throw new Error(
+    `Could not generate a fresh idiom after ${MAX_GENERATION_ATTEMPTS} attempts (tried: ${tried.join("; ")}).`
   );
-
-  const secondNormalized = second.term.toLowerCase().trim();
-  if (hasCollision(secondNormalized, full)) {
-    throw new Error(
-      `Generated idiom "${second.term}" collides with an already-used idiom after regeneration.`
-    );
-  }
-
-  await UsedIdiom.create({ idiom: secondNormalized });
-  return { ...second, type: "idiom" };
 }
